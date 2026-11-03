@@ -1,0 +1,12 @@
+# Секрети й дані — НЕ комітити
+.env
+*.db
+*.db-journal
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
