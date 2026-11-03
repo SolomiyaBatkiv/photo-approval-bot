@@ -1,45 +1,39 @@
 # Photo Approval Bot
 
-Виконавець генерує фото на Higgsfield → надсилає в бот → апрувер тисне ✅ або ❌ з коментарем → відповідь повертається виконавцю.
-Після ✅ фото зберігається на Google Drive, а в таблицю додається рядок: **Manager · Notes · Added Date · Link · Gender**.
+Telegram-бот для апруву фото від менеджерів.
 
-## Запуск
+## Що робить
 
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # заповнити змінні
-python bot.py
-```
+1. Менеджер пише `/start`, вводить ім'я → апрувер підтверджує доступ.
+2. Менеджер надсилає фото в бот і обирає стать: **Male / Female**.
+3. Апрувер отримує фото з кнопками **✅ Approve / ❌ Reject**.
+   - **Reject** → апрувер пише коментар → він приходить менеджеру.
+   - **Approve** → фото зберігається на Google Drive (`photo/male` або `photo/female`),
+     у Google Таблицю додається рядок: Manager · Notes · Added Date · Link · Gender.
 
-1. Створіть бота в @BotFather, візьміть токен → `BOT_TOKEN`.
-2. Апрувер пише боту `/id` → `APPROVER_ID`, перезапустити.
+Апрувер — людина з `APPROVER_ID` у `.env`.
 
-## Google Таблиця + Drive
+## Файли
 
-1. У таблиці додайте заголовок **Gender** у клітинку `E1`.
-2. Створіть папку на Google Drive для фото, скопіюйте її ID з адреси.
-3. Таблиця → **Розширення → Apps Script**, вставте код з `apps_script.gs`, заповніть `SECRET` і `FOLDER_ID`, збережіть.
-4. **Розгорнути → Нове розгортання → Вебзастосунок**: «Виконувати як: Я», «Доступ: Усі». Дайте дозволи.
-5. URL розгортання → `SHEETS_WEBHOOK_URL`, секрет → `SHEETS_SECRET`.
+| Файл | За що відповідає |
+|---|---|
+| `bot.py` | увесь код бота (Python, aiogram 3) |
+| `requirements.txt` | залежності |
+| `.env.example` | шаблон налаштувань; справжній `.env` передається окремо, не через git |
+| `apps_script.gs` | код Google Apps Script, що кладе фото на Drive і пише рядок у таблицю (вже розгорнутий, чіпати не треба) |
+| `bot.db` | створюється автоматично при першому запуску (менеджери, заявки); не в git |
 
-Після змін у скрипті: **Розгорнути → Керувати розгортаннями → Редагувати → Нова версія** (URL лишається той самий).
-
-## Стать
-
-Після надсилання фото бот питає менеджера: **Male / Female**. Фото йде на апрув лише після вибору.
-Після апруву файл потрапляє в підпапку `male` або `female` всередині папки `FOLDER_ID`, а в колонку Gender пишеться Male / Female.
-
-## Деплой на сервер (Ubuntu, systemd)
+## Запуск на сервері (Ubuntu)
 
 ```bash
 sudo apt update && sudo apt install -y python3-venv git
-git clone <URL цього репозиторію> ~/photobot && cd ~/photobot
+git clone https://github.com/SolomiyaBatkiv/photo-approval-bot.git ~/photobot
+cd ~/photobot
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp .env.example .env && nano .env   # значення передаються окремо, не через git
+# покласти отриманий .env у ~/photobot/
 ```
 
-Сервіс:
+Автозапуск:
 
 ```bash
 sudo tee /etc/systemd/system/photobot.service > /dev/null <<EOF
@@ -58,20 +52,13 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 sudo systemctl daemon-reload && sudo systemctl enable --now photobot
-journalctl -u photobot -f   # логи
 ```
 
-Оновлення: `git pull && sudo systemctl restart photobot`.
+Після запуску апрувер пише боту `/start` і вводить ім'я, менеджери — так само `/start`.
 
-> Бот на одному токені може працювати лише в одному місці — перед запуском на сервері зупиніть локальну копію.
-> `bot.db` (менеджери й заявки) не в git: перенесіть файл окремо (`scp`) або менеджери зареєструються заново.
+## Корисне
 
-## Команди
-- `/start` — інструкція + кнопка «Згенерувати фото»
-- `/id` — показати свій Telegram ID
-- `/cancel` — апрувер скасовує написання коментаря
-- `/managers` — апрувер: список менеджерів
-- `/approver` — апрувер: передати роль іншому зареєстрованому менеджеру (заявки в очікуванні переходять до нього; зберігається в `bot.db` і має пріоритет над `APPROVER_ID` з `.env`)
-- `/resync` — апрувер: повторно записати в таблицю фото, які не записались
-
-Заявки й статуси — у `bot.db` (SQLite, таблиця `submissions`).
+- Логи: `journalctl -u photobot -f`
+- Оновлення: `git pull && sudo systemctl restart photobot`
+- Бот на одному токені працює лише в одному місці — перед запуском на сервері зупинити локальну копію.
+- Не змінювати `APPROVER_ID` у `.env` без узгодження з власницею.
