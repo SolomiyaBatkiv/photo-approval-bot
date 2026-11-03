@@ -1,8 +1,8 @@
 """Telegram-бот для апруву фото.
 
 Схема:
-  1. Виконавець тисне «Згенерувати фото» -> відкривається Higgsfield.
-  2. Генерує фото на сайті й надсилає його в бот (фото або файлом),
+  1. Менеджер реєструється (/start), апрувер дає доступ.
+  2. Менеджер надсилає фото в бот (фото або файлом),
      бот питає стать: Male / Female.
   3. Бот пересилає фото апруверу з кнопками ✅ / ❌.
   4. ✅ -> виконавцю приходить «Прийнято»; фото йде на Google Drive
@@ -48,9 +48,6 @@ for _item in os.getenv("MANAGERS", "").split(","):
         _id, _name = _item.split(":", 1)
         if _id.strip().isdigit():
             MANAGERS[int(_id.strip())] = _name.strip()
-GENERATOR_URL = os.getenv(
-    "GENERATOR_URL", "https://higgsfield.ai/ai/image?model=nano-banana-pro"
-)
 DB_PATH = os.getenv("DB_PATH", "bot.db")
 
 # Google Таблиця + Drive (через Apps Script, див. apps_script.gs)
@@ -157,12 +154,6 @@ def now() -> str:
 
 # ---------- Клавіатури ----------
 
-def start_kb():
-    kb = InlineKeyboardBuilder()
-    kb.button(text="🎨 Згенерувати фото", url=GENERATOR_URL)
-    return kb.as_markup()
-
-
 def review_kb(sub_id: int):
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Approve", callback_data=f"ok:{sub_id}")
@@ -214,11 +205,10 @@ def manager_name(user_id: int, fallback: str | None) -> str:
 def start_text(user_id: int) -> str:
     text = (
         "Як це працює:\n\n"
-        "1. Натисніть «🎨 Згенерувати фото» і створіть фото на сайті.\n"
-        "2. Завантажте його й надішліть сюди <b>файлом</b> (щоб не втратити якість) або як фото. "
+        "1. Надішліть фото сюди <b>файлом</b> (щоб не втратити якість) або як фото. "
         "У підписі можна додати нотатку — вона потрапить у таблицю.\n"
-        "3. Оберіть стать: Male або Female.\n"
-        "4. Фото піде на апрув, відповідь прийде сюди ж."
+        "2. Оберіть стать: Male або Female.\n"
+        "3. Фото піде на апрув, відповідь прийде сюди ж."
     )
     if user_id == APPROVER_ID:
         text += (
@@ -326,8 +316,7 @@ async def cmd_start(message: Message, state: FSMContext):
 
     await message.answer(
         f"Привіт, {html.escape(manager_name(uid, message.from_user.first_name))}! "
-        + start_text(uid),
-        reply_markup=start_kb(),
+        + start_text(uid)
     )
 
 
@@ -362,7 +351,7 @@ async def reg_name(message: Message, state: FSMContext, bot: Bot):
 
     if status == "active":
         await message.answer(
-            f"Готово, {html.escape(name)}! " + start_text(u.id), reply_markup=start_kb()
+            f"Готово, {html.escape(name)}! " + start_text(u.id)
         )
         return
 
@@ -393,8 +382,7 @@ async def on_registration(call: CallbackQuery, bot: Bot):
         verdict = "✅ Доступ надано"
         await bot.send_message(
             uid,
-            f"✅ Доступ відкрито, {html.escape(m['name'])}!\n\n" + start_text(uid),
-            reply_markup=start_kb(),
+            f"✅ Доступ відкрито, {html.escape(m['name'])}!\n\n" + start_text(uid)
         )
     else:
         with db() as conn:
@@ -478,8 +466,7 @@ async def on_transfer_approver(call: CallbackQuery, bot: Bot):
         await bot.send_message(
             new_id,
             f"👑 Вас призначено апрувером.\n"
-            f"Заявок в очікуванні: {len(pending)}.\n\n" + start_text(new_id),
-            reply_markup=start_kb(),
+            f"Заявок в очікуванні: {len(pending)}.\n\n" + start_text(new_id)
         )
     except Exception as e:
         # Людина могла заблокувати бота — роль лишається за старим апрувером
@@ -569,8 +556,7 @@ async def approver_comment(message: Message, state: FSMContext, bot: Bot):
         "Виправте й надішліть нове фото сюди.",
         reply_parameters=ReplyParameters(
             message_id=sub["user_msg_id"], allow_sending_without_reply=True
-        ),
-        reply_markup=start_kb(),
+        )
     )
     await mark_decided(bot, sub, f"❌ Rejected: {html.escape(comment)}")
     await message.answer(f"Коментар до #{sub_id} надіслано виконавцю.")
@@ -740,8 +726,7 @@ async def edit_approver_msg(bot: Bot, sub: sqlite3.Row, verdict: str) -> None:
 @router.message(F.text)
 async def fallback(message: Message):
     await message.answer(
-        "Надішліть згенероване фото сюди (краще файлом), і воно піде на апрув.",
-        reply_markup=start_kb(),
+        "Надішліть згенероване фото сюди (краще файлом), і воно піде на апрув."
     )
 
 
