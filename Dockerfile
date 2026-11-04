@@ -20,4 +20,5 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     DB_PATH=/data/bot.db
+EXPOSE 8080
 CMD ["python", "bot.py"]

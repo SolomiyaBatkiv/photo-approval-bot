@@ -57,6 +57,49 @@ fly secrets set -a photo-approval-bot \
 
 Також джобу можна запустити вручну: Actions → Deploy → Run workflow.
 
+## Webhook
+
+За замовчуванням бот працює через **long polling** (`BOT_MODE = 'polling'` у `fly.toml`).
+HTTP-сервер піднятий завжди:
+
+| Ендпоінт | Що робить |
+|---|---|
+| `GET /healthz` | `{"ok": true, "mode": "polling"}` — healthcheck Fly |
+| `POST /telegram/webhook` | приймає апдейти від Telegram; без правильного заголовка `X-Telegram-Bot-Api-Secret-Token` → `401`, якщо `WEBHOOK_SECRET` не задано → `503` |
+
+### Як перейти на webhook
+
+1. **Перевірити, що ендпоінт живий** (після будь-якого деплою з цим кодом):
+   ```bash
+   curl https://photo-approval-bot.fly.dev/healthz                 # {"ok": true, ...}
+   curl -i -X POST https://photo-approval-bot.fly.dev/telegram/webhook  # 401 = секрет на місці
+   ```
+   Якщо друга команда дає `503` — задати секрет:
+   `fly secrets set -a photo-approval-bot WEBHOOK_SECRET=$(openssl rand -hex 32)`.
+
+2. **Увімкнути webhook:** у `fly.toml` змінити `BOT_MODE = 'polling'` → `BOT_MODE = 'webhook'` і задеплоїти
+   (PR у `main` → CI, або `npm run deploy`). Бот сам зареєструє webhook у Telegram при старті.
+
+3. **Перевірити:**
+   - у `npm run logs` є рядок `Webhook встановлено: https://photo-approval-bot.fly.dev/telegram/webhook`;
+   - бот відповідає на `/start`;
+   - (опційно) `curl https://api.telegram.org/bot<BOT_TOKEN>/getWebhookInfo` — `url` заповнений, `last_error_message` відсутній.
+
+4. **(Опційно) Сон, коли бот не використовується** — тільки в режимі webhook! У `fly.toml`:
+   ```toml
+   auto_stop_machines = 'suspend'   # або 'stop', якщо suspend поводиться нестабільно
+   min_machines_running = 0
+   ```
+   Fly зупинятиме машину після кількох хвилин без запитів і будитиме на перше повідомлення.
+   Перше повідомлення після сну оброблятиметься з затримкою (suspend — частки секунди, stop — ~7–8 с).
+   Запис фото в таблицю після ✅ може тривати до хвилини-двох; якщо машина засне посеред нього,
+   запис не завершиться — такі фото дозаписує команда `/resync`.
+
+### Як повернутися на polling
+
+У `fly.toml` повернути `BOT_MODE = 'polling'`, а також `auto_stop_machines = 'off'` і `min_machines_running = 1`,
+якщо їх міняли. Задеплоїти — бот сам видалить webhook при старті.
+
 ## Корисне
 
 - Логи: `npm run logs`

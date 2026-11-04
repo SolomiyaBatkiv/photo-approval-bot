@@ -1,5 +1,7 @@
-# Бот працює через long polling: HTTP-сервісу немає, тому машина не засинає.
+# Режим за замовчуванням — long polling (BOT_MODE=polling): машина має працювати постійно.
+# HTTP-сервіс (/healthz і /telegram/webhook) піднятий в обох режимах.
 # Має бути рівно ОДНА машина — два інстанси на одному токені конфліктують у Telegram.
+# Як перейти на webhook — див. README, розділ «Webhook».
 
 app = 'photo-approval-bot'
 primary_region = 'fra'
@@ -11,6 +13,24 @@ kill_timeout = '10s'
 
 [env]
   DB_PATH = '/data/bot.db'
+  PORT = '8080'
+  BOT_MODE = 'polling'
+  WEBHOOK_BASE_URL = 'https://photo-approval-bot.fly.dev'
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # polling: машина не повинна засинати (інакше бот перестане отримувати повідомлення)
+  auto_stop_machines = 'off'
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = '30s'
+    interval = '30s'
+    timeout = '5s'
+    method = 'GET'
+    path = '/healthz'
 
 # SQLite (менеджери, заявки, поточний апрувер) живе на томі
 [mounts]

@@ -17,10 +17,12 @@ import html
 import json
 import logging
 import os
+import signal
 import sqlite3
 from datetime import datetime, timezone
 
 import aiohttp
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -29,6 +31,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message, ReplyParameters
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -53,6 +56,15 @@ DB_PATH = os.getenv("DB_PATH", "bot.db")
 # Google Таблиця + Drive (через Apps Script, див. apps_script.gs)
 SHEETS_WEBHOOK_URL = os.getenv("SHEETS_WEBHOOK_URL", "")
 SHEETS_SECRET = os.getenv("SHEETS_SECRET", "")
+
+# Режим отримання апдейтів: polling (за замовчуванням) | webhook.
+# HTTP-сервер (/healthz і webhook-ендпоінт) працює в обох режимах.
+BOT_MODE = os.getenv("BOT_MODE", "polling").strip().lower()
+PORT = int(os.getenv("PORT", "8080"))
+WEBHOOK_PATH = "/telegram/webhook"
+WEBHOOK_BASE_URL = os.getenv("WEBHOOK_BASE_URL", "").strip().rstrip("/")
+# Telegram надсилає його в заголовку X-Telegram-Bot-Api-Secret-Token (A-Z a-z 0-9 _ -)
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "").strip()
 
 GENDERS = {"male": "♂ Male", "female": "♀ Female"}
 
@@ -730,15 +742,78 @@ async def fallback(message: Message):
     )
 
 
+# ---------- HTTP: healthcheck + webhook ----------
+
+async def healthz(request: web.Request) -> web.Response:
+    return web.json_response({"ok": True, "mode": BOT_MODE})
+
+
+async def webhook_disabled(request: web.Request) -> web.Response:
+    return web.json_response({"ok": False, "error": "WEBHOOK_SECRET not set"}, status=503)
+
+
+def build_app(dp: Dispatcher, bot: Bot) -> web.Application:
+    app = web.Application()
+    app.router.add_get("/healthz", healthz)
+    if WEBHOOK_SECRET:
+        # Запити без правильного секрету отримують 401
+        SimpleRequestHandler(dispatcher=dp, bot=bot, secret_token=WEBHOOK_SECRET).register(
+            app, path=WEBHOOK_PATH
+        )
+    else:
+        # Без секрету ендпоінт не приймає апдейти взагалі
+        app.router.add_post(WEBHOOK_PATH, webhook_disabled)
+    return app
+
+
+async def run_webhook(dp: Dispatcher, bot: Bot) -> None:
+    if not (WEBHOOK_BASE_URL and WEBHOOK_SECRET):
+        raise SystemExit("BOT_MODE=webhook потребує WEBHOOK_BASE_URL і WEBHOOK_SECRET")
+    url = WEBHOOK_BASE_URL + WEBHOOK_PATH
+    await bot.set_webhook(
+        url,
+        secret_token=WEBHOOK_SECRET,
+        allowed_updates=dp.resolve_used_update_types(),
+    )
+    logging.info("Webhook встановлено: %s", url)
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        loop.add_signal_handler(sig, stop.set)
+    await stop.wait()
+
+
+async def run_polling(dp: Dispatcher, bot: Bot) -> None:
+    # Якщо раніше був webhook, Telegram не віддасть апдейти через getUpdates
+    await bot.delete_webhook()
+    await dp.start_polling(bot)
+
+
 async def main():
     logging.basicConfig(level=logging.INFO)
+    if BOT_MODE not in ("polling", "webhook"):
+        raise SystemExit(f"Невідомий BOT_MODE={BOT_MODE!r}: має бути polling або webhook")
     if not APPROVER_ID:
         logging.warning("APPROVER_ID не задано: напишіть боту /start, щоб дізнатися свій ID")
     init_db()
     bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher()
     dp.include_router(router)
-    await dp.start_polling(bot)
+
+    runner = web.AppRunner(build_app(dp, bot))
+    await runner.setup()
+    await web.TCPSite(runner, "0.0.0.0", PORT).start()
+    logging.info("HTTP-сервер на :%s (режим: %s)", PORT, BOT_MODE)
+
+    try:
+        if BOT_MODE == "webhook":
+            await run_webhook(dp, bot)
+        else:
+            await run_polling(dp, bot)
+    finally:
+        await runner.cleanup()
+        await bot.session.close()
 
 
 if __name__ == "__main__":
