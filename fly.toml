@@ -1,0 +1,25 @@
+# Бот працює через long polling: HTTP-сервісу немає, тому машина не засинає.
+# Має бути рівно ОДНА машина — два інстанси на одному токені конфліктують у Telegram.
+
+app = 'photo-approval-bot'
+primary_region = 'fra'
+kill_signal = 'SIGTERM'
+kill_timeout = '10s'
+
+[build]
+  dockerfile = 'Dockerfile'
+
+[env]
+  DB_PATH = '/data/bot.db'
+
+# SQLite (менеджери, заявки, поточний апрувер) живе на томі
+[mounts]
+  source = 'photobot_data'
+  destination = '/data'
+
+[[vm]]
+  cpu_kind = 'shared'
+  cpus = 1
+  # aiogram 3 при імпорті будує pydantic-моделі всього Bot API (~170-230 МБ RSS);
+  # на 256 МБ процес вбиває OOM ще до старту polling
+  memory = '512mb'

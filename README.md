@@ -18,47 +18,48 @@ Telegram-бот для апруву фото від менеджерів.
 | Файл | За що відповідає |
 |---|---|
 | `bot.py` | увесь код бота (Python, aiogram 3) |
-| `requirements.txt` | залежності |
-| `.env.example` | шаблон налаштувань; справжній `.env` передається окремо, не через git |
-| `apps_script.gs` | код Google Apps Script, що кладе фото на Drive і пише рядок у таблицю (вже розгорнутий, чіпати не треба) |
-| `bot.db` | створюється автоматично при першому запуску (менеджери, заявки); не в git |
+| `pyproject.toml` / `uv.lock` | залежності (пакетний менеджер [uv](https://docs.astral.sh/uv/)) |
+| `Dockerfile` | образ для продакшну (python:3.13-alpine, ~22 МБ стиснутий) |
+| `fly.toml` | конфіг Fly.io (застосунок `photo-approval-bot`, регіон `fra`, том `photobot_data` → `/data`) |
+| `package.json` | лише скрипти: `npm run dev`, `npm run deploy`, `npm run logs` |
+| `.github/workflows/deploy.yml` | CI: деплой при пуші в `main` з ручним підтвердженням |
+| `.env.example` | шаблон налаштувань (dev); прод-значення живуть у `fly secrets` |
+| `apps_script.gs` | код Google Apps Script, що кладе фото на Drive і пише рядок у таблицю (розгортається в Google, не в образі) |
 
-## Запуск на сервері (Ubuntu)
-
-```bash
-sudo apt update && sudo apt install -y python3-venv git
-git clone https://github.com/SolomiyaBatkiv/photo-approval-bot.git ~/photobot
-cd ~/photobot
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-# покласти отриманий .env у ~/photobot/
-```
-
-Автозапуск:
+## Локальний запуск
 
 ```bash
-sudo tee /etc/systemd/system/photobot.service > /dev/null <<EOF
-[Unit]
-Description=Photo approval bot
-After=network-online.target
-
-[Service]
-User=$USER
-WorkingDirectory=$HOME/photobot
-ExecStart=$HOME/photobot/.venv/bin/python bot.py
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOF
-sudo systemctl daemon-reload && sudo systemctl enable --now photobot
+uv sync
+cp .env.example .env   # вписати свої значення
+npm run dev            # = uv run bot.py; bot.db створиться поруч
 ```
 
-Після запуску апрувер пише боту `/start` і вводить ім'я, менеджери — так само `/start`.
+## Деплой (Fly.io)
+
+Застосунок і том уже створені. Секрети задаються один раз (прод-значення, не dev):
+
+```bash
+fly secrets set -a photo-approval-bot \
+  BOT_TOKEN=... APPROVER_ID=... SHEETS_WEBHOOK_URL=... SHEETS_SECRET=...
+```
+
+Деплой з локальної машини: `npm run deploy`.
+
+### CI
+
+При кожному пуші в `main` GitHub Actions створює джобу **Deploy to Fly.io**, яка чекає ручного підтвердження.
+Одноразове налаштування:
+
+1. `fly tokens create deploy -a photo-approval-bot` → додати як секрет репозиторію `FLY_API_TOKEN`
+   (Settings → Secrets and variables → Actions).
+2. Settings → Environments → `production` → **Required reviewers** → додати себе.
+   Без цього правила деплой піде автоматично.
+
+Також джобу можна запустити вручну: Actions → Deploy → Run workflow.
 
 ## Корисне
 
-- Логи: `journalctl -u photobot -f`
-- Оновлення: `git pull && sudo systemctl restart photobot`
-- Бот на одному токені працює лише в одному місці — перед запуском на сервері зупинити локальну копію.
-- Не змінювати `APPROVER_ID` у `.env` без узгодження з власницею.
+- Логи: `npm run logs`
+- SSH у машину: `fly ssh console -a photo-approval-bot` (база — `/data/bot.db`)
+- Бот на одному токені працює лише в одному місці, і на Fly має бути **рівно одна машина** (том це й так гарантує).
+- Не змінювати `APPROVER_ID` без узгодження з власницею. Якщо апрувера передали командою `/approver`, значення з бази має пріоритет над змінною.
