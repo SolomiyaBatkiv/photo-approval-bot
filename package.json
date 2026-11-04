@@ -4,7 +4,7 @@
   "description": "Лише скрипти для деплою; сам бот — Python (uv)",
   "scripts": {
     "dev": "uv run bot.py",
-    "deploy": "fly deploy --remote-only --ha=false",
-    "logs": "fly logs"
+    "deploy": "flyctl deploy --remote-only --ha=false",
+    "logs": "flyctl logs"
   }
 }
